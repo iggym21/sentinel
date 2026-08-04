@@ -1,9 +1,22 @@
-.DS_Store
-.superpowers/
-venv/
-__pycache__/
-*.pyc
-*.db
+# Environment
 .env
+.env.local
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+
+# Node / Frontend
 node_modules/
 .next/
+
+# OS
+.DS_Store
+
+# Project
+.superpowers/
