@@ -1,11 +1,13 @@
 """Deterministic, no-LLM `ReasoningBackend` implementation.
 
-Stub for Task 9 — `backend_factory.get_reasoning_backend()` needs a
-`HeuristicBackend` class to select when no Anthropic API key is
-configured (or the backend is forced to "heuristic"), so the whole
-trigger -> investigate -> brief loop stays testable and demoable with
-zero external API keys. The real rule-based logic (runs the same tools,
-same trace shape, as the real loop would) is implemented in Task 10.
+Runs the exact same five non-terminal Analyst tools the real Claude
+tool-use loop would (`get_prior_briefs`, `get_price_history`,
+`get_recent_news`, `get_filings`, `calculate_ratios`), in a fixed
+order, recording each call/result pair through the same `TraceRecorder`
+shape the real loop uses. This is what lets the whole trigger ->
+investigate -> brief pipeline run end-to-end with zero external API
+keys (`sentinel-spec` Global Constraints) — no LLM judgment, just
+simple rules derived from the real data the tools return.
 """
 
 from __future__ import annotations
@@ -16,6 +18,18 @@ from providers.base import NewsItem
 from services.trace import TraceRecorder
 
 from agents.reasoning_backend import AnalystBriefResult, WatchdogDecision
+
+# Fixed tool call order — matches what the real Claude loop is expected
+# to do per the system prompt guidance (check prior briefs early, then
+# gather price/news/filings evidence, then compute ratios last since
+# they summarize the price history already fetched).
+_TOOL_ORDER = [
+    "get_prior_briefs",
+    "get_price_history",
+    "get_recent_news",
+    "get_filings",
+    "calculate_ratios",
+]
 
 
 class HeuristicBackend:
@@ -33,4 +47,144 @@ class HeuristicBackend:
         tool_dispatch: dict[str, Callable],
         trace: TraceRecorder,
     ) -> AnalystBriefResult:
-        raise NotImplementedError
+        results: dict[str, object] = {}
+        for tool_name in _TOOL_ORDER:
+            tool_input = {"ticker": ticker}
+            trace.record_tool_call(tool_name, tool_input)
+            output = tool_dispatch[tool_name](tool_input)
+            trace.record_tool_result(tool_name, output)
+            results[tool_name] = output
+
+        prior_briefs = results["get_prior_briefs"] or []
+        price_history = results["get_price_history"] or []
+        news = results["get_recent_news"] or []
+        filings = results["get_filings"] or []
+        ratios = results["calculate_ratios"] or {}
+
+        trend_20d_pct = ratios.get("trend_20d_pct") or 0
+        trend_5d_pct = ratios.get("trend_5d_pct")
+        volatility_20d_pct = ratios.get("volatility_20d_pct")
+        avg_volume_20d = ratios.get("avg_volume_20d")
+
+        if trend_20d_pct > 1:
+            thesis = "bullish"
+        elif trend_20d_pct < -1:
+            thesis = "bearish"
+        else:
+            thesis = "neutral"
+
+        # Scale confidence by the magnitude of the trend: bigger moves
+        # are more legible signals, so a stronger trend earns higher
+        # confidence, clamped to the [1, 5] Brief schema range.
+        confidence = max(1, min(5, round(1 + abs(trend_20d_pct) / 2)))
+
+        evidence: list[dict] = [
+            {
+                "claim": (
+                    f"20-day price trend is {trend_20d_pct:+.2f}% "
+                    f"(5-day: {trend_5d_pct:+.2f}%)"
+                    if trend_5d_pct is not None
+                    else f"20-day price trend is {trend_20d_pct:+.2f}%"
+                ),
+                "source_tool": "calculate_ratios",
+                "source_ref": None,
+            }
+        ]
+        if volatility_20d_pct is not None:
+            evidence.append(
+                {
+                    "claim": f"20-day volatility is {volatility_20d_pct}%",
+                    "source_tool": "calculate_ratios",
+                    "source_ref": None,
+                }
+            )
+        if avg_volume_20d is not None:
+            evidence.append(
+                {
+                    "claim": f"Average 20-day volume is {avg_volume_20d}",
+                    "source_tool": "calculate_ratios",
+                    "source_ref": None,
+                }
+            )
+        if news:
+            headline = news[0]
+            evidence.append(
+                {
+                    "claim": f"Recent headline: \"{headline.get('headline')}\"",
+                    "source_tool": "get_recent_news",
+                    "source_ref": headline.get("source"),
+                }
+            )
+        if filings:
+            filing = filings[0]
+            evidence.append(
+                {
+                    "claim": (
+                        f"Most recent filing: {filing.get('form_type')} "
+                        f"filed {filing.get('filed_at')}"
+                    ),
+                    "source_tool": "get_filings",
+                    "source_ref": filing.get("url"),
+                }
+            )
+        if price_history:
+            first_close = price_history[0].get("close")
+            last_close = price_history[-1].get("close")
+            evidence.append(
+                {
+                    "claim": (
+                        f"Price moved from {first_close} to {last_close} "
+                        "over the fetched history"
+                    ),
+                    "source_tool": "get_price_history",
+                    "source_ref": None,
+                }
+            )
+
+        summary = (
+            f"{ticker} shows a {thesis} signal based on price action: "
+            f"20-day trend {trend_20d_pct:+.2f}%"
+            + (f", volatility {volatility_20d_pct}%" if volatility_20d_pct is not None else "")
+            + ". "
+            + ratios.get("note", "")
+        ).strip()
+
+        diff_from_prior: str | None = None
+        if prior_briefs:
+            prior_thesis = prior_briefs[0].get("thesis")
+            if prior_thesis and prior_thesis != thesis:
+                diff_from_prior = (
+                    f"Thesis changed from {prior_thesis} to {thesis} "
+                    "since the most recent prior brief."
+                )
+            else:
+                diff_from_prior = "Thesis is unchanged from the most recent prior brief."
+
+        if thesis == "bullish":
+            suggested_action = "buy"
+        elif thesis == "bearish":
+            suggested_action = "sell"
+        else:
+            suggested_action = "hold"
+
+        result = AnalystBriefResult(
+            thesis=thesis,
+            confidence=confidence,
+            summary=summary,
+            evidence=evidence,
+            diff_from_prior=diff_from_prior,
+            suggested_action=suggested_action,
+        )
+
+        trace.record_final(
+            {
+                "thesis": result.thesis,
+                "confidence": result.confidence,
+                "summary": result.summary,
+                "evidence": result.evidence,
+                "diff_from_prior": result.diff_from_prior,
+                "suggested_action": result.suggested_action,
+            }
+        )
+
+        return result
