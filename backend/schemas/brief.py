@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from models.brief import SuggestedAction, Thesis
+from schemas.agent_run import AgentRunOut
 
 
 class BriefOut(BaseModel):
@@ -19,3 +20,9 @@ class BriefOut(BaseModel):
     evidence: list[dict[str, Any]]
     diff_from_prior: str | None
     suggested_action: SuggestedAction | None
+
+
+class BriefDetail(BriefOut):
+    """`BriefOut` merged with the full `AgentRun` (including its reasoning trace)."""
+
+    agent_run: AgentRunOut
