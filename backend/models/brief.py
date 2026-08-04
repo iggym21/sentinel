@@ -45,4 +45,4 @@ class Brief(Base):
     def ticker_symbol(self) -> str:
         """Convenience accessor so `BriefOut`/`BriefDetail` (from_attributes=True)
         can expose the ticker's symbol without every caller needing a manual join."""
-        return self.ticker.symbol
+        return self.ticker.symbol if self.ticker else "UNKNOWN"
