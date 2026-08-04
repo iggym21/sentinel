@@ -14,10 +14,17 @@ from __future__ import annotations
 
 from typing import Callable
 
+from config import settings
 from providers.base import NewsItem
 from services.trace import TraceRecorder
 
 from agents.reasoning_backend import AnalystBriefResult, WatchdogDecision
+
+# Large-magnitude thresholds that alone are enough to warrant a full
+# Analyst investigation, independent of any corroborating news — a
+# volume or price move this extreme is unusual enough on its own.
+_LARGE_VOLUME_RATIO = 3.0
+_LARGE_PRICE_MOVE_PCT = 5.0
 
 # Fixed tool call order — matches what the real Claude loop is expected
 # to do per the system prompt guidance (check prior briefs early, then
@@ -38,7 +45,47 @@ class HeuristicBackend:
     def watchdog_judge(
         self, ticker: str, metrics: dict, headlines: list[NewsItem]
     ) -> WatchdogDecision:
-        raise NotImplementedError
+        volume_ratio = metrics.get("volume_ratio", 0) or 0
+        day_change_pct = metrics.get("day_change_pct", 0) or 0
+
+        large_volume = volume_ratio >= _LARGE_VOLUME_RATIO
+        large_move = abs(day_change_pct) >= _LARGE_PRICE_MOVE_PCT
+
+        # "Threshold crossed at all" refers to the base anomaly-detection
+        # thresholds (the reason `watchdog_judge` is being called in the
+        # first place), lower bars than the large-magnitude ones above.
+        threshold_crossed = (
+            volume_ratio >= settings.volume_spike_threshold_multiplier
+            or abs(day_change_pct) >= settings.price_move_threshold_pct
+        )
+        has_corroborating_news = any(
+            ticker.lower() in headline.headline.lower() for headline in headlines
+        )
+
+        trigger = large_volume or large_move or (threshold_crossed and has_corroborating_news)
+
+        if large_volume:
+            rationale = (
+                f"Volume at {volume_ratio:.1f}x average — a large enough deviation "
+                "from normal trading activity to warrant investigation on its own."
+            )
+        elif large_move:
+            rationale = (
+                f"Price moved {day_change_pct:+.1f}% today — a large single-day "
+                "move that warrants investigation on its own."
+            )
+        elif trigger:
+            rationale = (
+                f"Volume at {volume_ratio:.1f}x average with a corroborating "
+                f"headline mentioning {ticker} — likely more than routine noise."
+            )
+        else:
+            rationale = (
+                f"Volume at {volume_ratio:.1f}x average with no corroborating "
+                "headlines — likely routine noise."
+            )
+
+        return WatchdogDecision(trigger=trigger, rationale=rationale)
 
     def run_analyst(
         self,

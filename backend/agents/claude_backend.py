@@ -27,7 +27,7 @@ from services.trace import TraceRecorder
 
 from agents.claude_client import get_anthropic_client
 from agents.reasoning_backend import AnalystBriefResult, WatchdogDecision
-from agents.tools.schemas import TOOL_SCHEMAS
+from agents.tools.schemas import SUBMIT_DECISION_SCHEMA, TOOL_SCHEMAS
 
 # Hard cap on tool-use round trips per Analyst run. Guards against a
 # model that never calls `submit_brief` (e.g. stuck looping on tool
@@ -43,6 +43,32 @@ _MAX_TOKENS = 8000
 # Must match `submit_brief`'s `input_schema.required` in
 # `agents/tools/schemas.py::TOOL_SCHEMAS` exactly.
 _SUBMIT_BRIEF_REQUIRED_FIELDS = ["thesis", "confidence", "summary", "evidence"]
+
+# The Watchdog's judgment call is a single small structured-output turn
+# (no tool-use loop, no multi-paragraph brief), so it needs far fewer
+# tokens than the Analyst's `_MAX_TOKENS`.
+_WATCHDOG_MAX_TOKENS = 1024
+
+# Must match `submit_decision`'s `input_schema.required` in
+# `agents/tools/schemas.py::SUBMIT_DECISION_SCHEMA` exactly.
+_SUBMIT_DECISION_REQUIRED_FIELDS = ["trigger", "rationale"]
+
+WATCHDOG_SYSTEM_PROMPT = """You are Sentinel's Watchdog Agent. A ticker's price or volume has \
+crossed a code-level anomaly threshold, and you must judge whether this warrants a full Analyst \
+investigation or is likely routine market noise.
+
+Distinguish routine volatility from genuinely unusual activity: minor moves and typical volume \
+fluctuations happen constantly and are not, by themselves, worth investigating. Use the provided \
+headlines as context — a threshold crossing that coincides with relevant news (earnings, \
+guidance, M&A, regulatory action) is far more likely to be genuinely significant than one with no \
+corroborating news at all.
+
+Be conservative: triggering a full investigation costs real time and money, so when the evidence \
+is ambiguous, prefer not to trigger. Only recommend triggering when the activity looks genuinely \
+unusual or is corroborated by relevant news.
+
+Call `submit_decision` with your judgment as your only action — this is a single-turn decision, \
+not an investigation of your own."""
 
 ANALYST_SYSTEM_PROMPT = """You are Sentinel's Analyst Agent, a market research assistant that \
 investigates a single ticker and produces a structured research brief.
@@ -68,6 +94,20 @@ def _build_user_message(ticker: str, trigger_context: dict | None) -> dict:
     return {"role": "user", "content": content}
 
 
+def _build_watchdog_user_message(ticker: str, metrics: dict, headlines: list[NewsItem]) -> dict:
+    headlines_text = (
+        "\n".join(f"- {item.headline} ({item.source}, {item.published_at})" for item in headlines)
+        if headlines
+        else "(no recent headlines)"
+    )
+    content = (
+        f"Ticker: {ticker}\n"
+        f"Metrics: {json.dumps(metrics, default=str)}\n"
+        f"Recent headlines:\n{headlines_text}"
+    )
+    return {"role": "user", "content": content}
+
+
 def _tool_result_content(output: object) -> str:
     if isinstance(output, str):
         return output
@@ -83,7 +123,34 @@ class ClaudeBackend:
     def watchdog_judge(
         self, ticker: str, metrics: dict, headlines: list[NewsItem]
     ) -> WatchdogDecision:
-        raise NotImplementedError
+        response = self.client.messages.create(
+            model=settings.watchdog_model,
+            max_tokens=_WATCHDOG_MAX_TOKENS,
+            system=WATCHDOG_SYSTEM_PROMPT,
+            messages=[_build_watchdog_user_message(ticker, metrics, headlines)],
+            tools=[SUBMIT_DECISION_SCHEMA],
+            tool_choice={"type": "tool", "name": "submit_decision"},
+        )
+
+        submit_input: dict | None = None
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "submit_decision":
+                submit_input = block.input
+                break
+
+        if submit_input is None:
+            raise RuntimeError("Watchdog response did not include a submit_decision tool call")
+
+        missing = [f for f in _SUBMIT_DECISION_REQUIRED_FIELDS if submit_input.get(f) is None]
+        if missing:
+            raise ValueError(
+                f"submit_decision call is missing required field(s): {', '.join(missing)}"
+            )
+
+        return WatchdogDecision(
+            trigger=submit_input["trigger"],
+            rationale=submit_input["rationale"],
+        )
 
     def run_analyst(
         self,

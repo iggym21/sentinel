@@ -12,6 +12,23 @@ Claude API so the model can call it.
 
 from __future__ import annotations
 
+# Watchdog's sole tool — forces structured output for its single-shot
+# judgment call (no other tools; the Watchdog doesn't investigate, it
+# just judges pre-fetched data). Used standalone via
+# `tools=[SUBMIT_DECISION_SCHEMA]`, not part of `TOOL_SCHEMAS` below.
+SUBMIT_DECISION_SCHEMA: dict = {
+    "name": "submit_decision",
+    "description": "Submit your judgment on whether this ticker's activity warrants a deeper investigation.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "trigger": {"type": "boolean", "description": "true if this warrants a full research brief"},
+            "rationale": {"type": "string", "description": "1-2 sentence explanation of the judgment"},
+        },
+        "required": ["trigger", "rationale"],
+    },
+}
+
 TOOL_SCHEMAS: list[dict] = [
     {
         "name": "get_filings",
