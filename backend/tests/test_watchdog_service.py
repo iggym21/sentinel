@@ -48,3 +48,49 @@ def test_crossed_and_triggered_runs_analyst(db_session):
     anomaly = db_session.query(Anomaly).one()
     assert anomaly.triggered_analyst_run is True
     backend.run_analyst.assert_called_once()
+
+
+def test_one_ticker_exception_does_not_abort_the_sweep(db_session):
+    """One ticker's failure (transient Claude API error, provider hiccup,
+    etc.) must not abort the whole tick: the second ticker still gets
+    processed and its result is correct, and the first ticker's result
+    reflects the error instead of raising out of run_watchdog_tick."""
+    bad = Ticker(symbol="BAD", added_at=datetime.now(timezone.utc), active=True)
+    good = Ticker(symbol="AAPL", added_at=datetime.now(timezone.utc), active=True)
+    db_session.add_all([bad, good])
+    db_session.commit()
+
+    market = MagicMock()
+
+    def get_price_snapshot(symbol):
+        if symbol == "BAD":
+            raise RuntimeError("provider hiccup")
+        return PriceSnapshotData(
+            ticker="AAPL",
+            price=190,
+            volume=1_000_000,
+            day_change_pct=0.3,
+            avg_volume_20d=1_000_000,
+            timestamp="t",
+        )
+
+    market.get_price_snapshot.side_effect = get_price_snapshot
+    market.get_recent_news.return_value = []
+
+    results = run_watchdog_tick(db_session, market, MagicMock())
+
+    assert len(results) == 2
+
+    bad_result = next(r for r in results if r["ticker"] == "BAD")
+    assert bad_result["crossed"] is None
+    assert bad_result["triggered"] is False
+    assert bad_result["anomaly_id"] is None
+    assert "provider hiccup" in bad_result["error"]
+
+    good_result = next(r for r in results if r["ticker"] == "AAPL")
+    assert good_result == {
+        "ticker": "AAPL",
+        "crossed": False,
+        "triggered": False,
+        "anomaly_id": None,
+    }

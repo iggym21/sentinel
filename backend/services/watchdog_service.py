@@ -70,6 +70,12 @@ def run_watchdog_tick(
     Returns a list of per-ticker result dicts:
     `{"ticker": symbol, "crossed": bool, "triggered": bool, "anomaly_id": int|None}`
     for the caller (API layer / seed script) to summarize.
+
+    A single ticker's exception (from `market`, `watchdog_judge`, or
+    `run_analyst_for_ticker`) is caught per-ticker so it can't abort the
+    sweep: that ticker's result dict instead has `"crossed": None`,
+    `"triggered": False`, `"anomaly_id": None`, plus an `"error": str(exc)`
+    key, and the loop continues to the next ticker.
     """
     watchdog_backend = backend if backend is not None else get_reasoning_backend()
 
@@ -78,61 +84,81 @@ def run_watchdog_tick(
     results: list[dict] = []
 
     for ticker in tickers:
-        snapshot = market.get_price_snapshot(ticker.symbol)
-        news = market.get_recent_news(ticker.symbol, days=3)
+        try:
+            snapshot = market.get_price_snapshot(ticker.symbol)
+            news = market.get_recent_news(ticker.symbol, days=3)
 
-        threshold_result = check_thresholds(
-            snapshot,
-            settings.volume_spike_threshold_multiplier,
-            settings.price_move_threshold_pct,
-        )
+            threshold_result = check_thresholds(
+                snapshot,
+                settings.volume_spike_threshold_multiplier,
+                settings.price_move_threshold_pct,
+            )
 
-        if not threshold_result.crossed:
-            # Quiet check: no DB write. See module docstring for why this
-            # is a deliberate no-op rather than a `PriceSnapshot` row.
+            if not threshold_result.crossed:
+                # Quiet check: no DB write. See module docstring for why
+                # this is a deliberate no-op rather than a `PriceSnapshot`
+                # row.
+                results.append(
+                    {
+                        "ticker": ticker.symbol,
+                        "crossed": False,
+                        "triggered": False,
+                        "anomaly_id": None,
+                    }
+                )
+                continue
+
+            decision = watchdog_backend.watchdog_judge(
+                ticker.symbol, threshold_result.raw_metrics, news
+            )
+
+            anomaly = Anomaly(
+                ticker_id=ticker.id,
+                detected_at=datetime.now(timezone.utc),
+                trigger_type=threshold_result.trigger_type,
+                raw_metrics=threshold_result.raw_metrics,
+                watchdog_rationale=decision.rationale,
+                triggered_analyst_run=decision.trigger,
+            )
+            db.add(anomaly)
+            db.commit()
+            db.refresh(anomaly)
+
+            if decision.trigger:
+                run_analyst_for_ticker(
+                    db,
+                    ticker.symbol,
+                    market,
+                    filings,
+                    anomaly_id=anomaly.id,
+                    backend=backend,
+                )
+
             results.append(
                 {
                     "ticker": ticker.symbol,
-                    "crossed": False,
-                    "triggered": False,
-                    "anomaly_id": None,
+                    "crossed": True,
+                    "triggered": decision.trigger,
+                    "anomaly_id": anomaly.id,
                 }
             )
-            continue
-
-        decision = watchdog_backend.watchdog_judge(
-            ticker.symbol, threshold_result.raw_metrics, news
-        )
-
-        anomaly = Anomaly(
-            ticker_id=ticker.id,
-            detected_at=datetime.now(timezone.utc),
-            trigger_type=threshold_result.trigger_type,
-            raw_metrics=threshold_result.raw_metrics,
-            watchdog_rationale=decision.rationale,
-            triggered_analyst_run=decision.trigger,
-        )
-        db.add(anomaly)
-        db.commit()
-        db.refresh(anomaly)
-
-        if decision.trigger:
-            run_analyst_for_ticker(
-                db,
-                ticker.symbol,
-                market,
-                filings,
-                anomaly_id=anomaly.id,
-                backend=backend,
+        except Exception as exc:
+            # One ticker's failure (transient Claude API error, provider
+            # hiccup, etc.) must not abort the whole sweep: prior results
+            # in `results` stay intact and remaining tickers still get
+            # processed. Roll back first so a partial `db.add()`/`db.commit()`
+            # sequence for *this* ticker (e.g. the anomaly insert failing,
+            # or `run_analyst_for_ticker` leaving the session dirty) can't
+            # leave the session in a broken state for the next iteration.
+            db.rollback()
+            results.append(
+                {
+                    "ticker": ticker.symbol,
+                    "crossed": None,
+                    "triggered": False,
+                    "anomaly_id": None,
+                    "error": str(exc),
+                }
             )
-
-        results.append(
-            {
-                "ticker": ticker.symbol,
-                "crossed": True,
-                "triggered": decision.trigger,
-                "anomaly_id": anomaly.id,
-            }
-        )
 
     return results
