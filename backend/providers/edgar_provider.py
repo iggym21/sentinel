@@ -148,7 +148,15 @@ class EdgarProvider:
         if self._ticker_to_cik is None:
             try:
                 self._ticker_to_cik = self._fetch_ticker_map()
-            except httpx.HTTPError:
+            except (httpx.HTTPError, ValueError, KeyError, AttributeError, TypeError):
+                # Any failure to fetch or parse company_tickers.json (HTTP
+                # error, a 200 with a non-JSON body - e.g. SEC serving a
+                # maintenance/CAPTCHA HTML page with a 200 status, whose
+                # .json() raises json.JSONDecodeError, a ValueError
+                # subclass - or a 200 with unexpected JSON shape, e.g. a
+                # list instead of the expected dict, raising AttributeError
+                # on .values()) should degrade gracefully to an unscoped
+                # search rather than blow up get_filings entirely.
                 self._ticker_to_cik = {}
 
         return self._ticker_to_cik.get(ticker.upper())

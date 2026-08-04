@@ -84,6 +84,49 @@ def test_get_filings_degrades_gracefully_when_ticker_lookup_fails():
 
 
 @respx.mock
+def test_get_filings_degrades_gracefully_when_ticker_lookup_returns_non_json():
+    # SEC occasionally serves a maintenance/CAPTCHA HTML page with a 200
+    # status instead of the expected JSON - response.json() would raise
+    # json.JSONDecodeError (a ValueError subclass) in that case.
+    respx.get("https://www.sec.gov/files/company_tickers.json").mock(
+        return_value=httpx.Response(200, text="<html>please enable JavaScript</html>")
+    )
+    route = respx.get(url__regex=r"https://efts\.sec\.gov/LATEST/search-index.*").mock(
+        return_value=httpx.Response(200, json={"hits": {"hits": [
+            {"_source": {"form": "10-Q", "file_date": "2026-07-15", "display_names": ["APPLE INC"]},
+             "_id": "0000320193-26-000050:aapl-20260630.htm"},
+        ]}})
+    )
+    provider = EdgarProvider(user_agent="Sentinel test@example.com")
+    filings = provider.get_filings("AAPL", form_types=["10-Q"], limit=5)
+
+    sent = route.calls[0].request
+    assert "ciks" not in httpx.QueryParams(sent.url.query.decode())
+    assert filings[0].url.startswith("https://www.sec.gov/")
+
+
+@respx.mock
+def test_get_filings_degrades_gracefully_when_ticker_lookup_returns_wrong_shape():
+    # Valid JSON, but not the expected {"0": {...}, "1": {...}} dict shape
+    # (e.g. a bare list) - data.values() would raise AttributeError.
+    respx.get("https://www.sec.gov/files/company_tickers.json").mock(
+        return_value=httpx.Response(200, json=["unexpected", "shape"])
+    )
+    route = respx.get(url__regex=r"https://efts\.sec\.gov/LATEST/search-index.*").mock(
+        return_value=httpx.Response(200, json={"hits": {"hits": [
+            {"_source": {"form": "10-Q", "file_date": "2026-07-15", "display_names": ["APPLE INC"]},
+             "_id": "0000320193-26-000050:aapl-20260630.htm"},
+        ]}})
+    )
+    provider = EdgarProvider(user_agent="Sentinel test@example.com")
+    filings = provider.get_filings("AAPL", form_types=["10-Q"], limit=5)
+
+    sent = route.calls[0].request
+    assert "ciks" not in httpx.QueryParams(sent.url.query.decode())
+    assert filings[0].url.startswith("https://www.sec.gov/")
+
+
+@respx.mock
 def test_get_filing_text_strips_html_and_truncates():
     respx.get("https://www.sec.gov/Archives/edgar/data/example.htm").mock(
         return_value=httpx.Response(200, text="<html><body><p>Revenue grew 12%.</p></body></html>")
