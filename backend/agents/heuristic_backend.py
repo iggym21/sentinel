@@ -75,9 +75,22 @@ class HeuristicBackend:
                 "move that warrants investigation on its own."
             )
         elif trigger:
+            volume_crossed = volume_ratio >= settings.volume_spike_threshold_multiplier
+            move_crossed = abs(day_change_pct) >= settings.price_move_threshold_pct
+
+            if volume_crossed and move_crossed:
+                metric_clause = (
+                    f"Volume at {volume_ratio:.1f}x average and price "
+                    f"moved {day_change_pct:+.1f}% today"
+                )
+            elif volume_crossed:
+                metric_clause = f"Volume at {volume_ratio:.1f}x average"
+            else:
+                metric_clause = f"Price moved {day_change_pct:+.1f}% today"
+
             rationale = (
-                f"Volume at {volume_ratio:.1f}x average with a corroborating "
-                f"headline mentioning {ticker} — likely more than routine noise."
+                f"{metric_clause} with a corroborating headline mentioning "
+                f"{ticker} — likely more than routine noise."
             )
         else:
             rationale = (
