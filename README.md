@@ -17,7 +17,7 @@ Two agents, two jobs:
 | **Full brief feed** | ![Briefs feed](docs/screenshots/briefs-feed.jpg) |
 | **Expandable reasoning trace — every tool call, input, and output** | ![Reasoning trace](docs/screenshots/reasoning-trace.jpg) |
 
-## Why it's demoable with zero API keys
+## Demo with zero API keys
 
 The entire trigger → investigate → brief loop runs offline, deterministically, with no external accounts:
 
