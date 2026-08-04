@@ -40,9 +40,9 @@ def _build_market_provider():
 @router.post("/tick")
 def trigger_watchdog_tick(db: Session = Depends(get_db)) -> list[dict]:
     market = _build_market_provider()
-    filings = EdgarProvider(user_agent=_EDGAR_USER_AGENT)
-    backend = get_reasoning_backend()
     try:
+        filings = EdgarProvider(user_agent=_EDGAR_USER_AGENT)
+        backend = get_reasoning_backend()
         return run_watchdog_tick(db, market, filings, backend=backend)
     finally:
         if isinstance(market, AlpacaProvider):

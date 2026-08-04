@@ -64,9 +64,9 @@ def get_ticker_history(symbol: str, db: Session = Depends(get_db)) -> dict:
 @router.post("/{symbol}/run", response_model=BriefOut)
 def run_analyst_now(symbol: str, db: Session = Depends(get_db)) -> Brief:
     market = _build_market_provider()
-    filings = EdgarProvider(user_agent=_EDGAR_USER_AGENT)
-    backend = get_reasoning_backend()
     try:
+        filings = EdgarProvider(user_agent=_EDGAR_USER_AGENT)
+        backend = get_reasoning_backend()
         return run_analyst_for_ticker(
             db, symbol.strip().upper(), market, filings, backend=backend
         )

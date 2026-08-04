@@ -68,7 +68,7 @@ def _compute_status(db: Session, ticker_id: int) -> str:
     )
     if latest_anomaly is not None and latest_anomaly.triggered_analyst_run:
         run = latest_anomaly.agent_run
-        if run is not None and run.completed_at is not None:
+        if run is not None and run.status == RunStatus.complete and run.completed_at is not None:
             if datetime.now(timezone.utc) - _as_utc(run.completed_at) <= _TRIGGERED_WINDOW:
                 return "triggered"
 
