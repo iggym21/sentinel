@@ -2,8 +2,6 @@
 
 **An autonomous, two-agent market research system.** Sentinel watches a stock watchlist, decides on its own when something's worth investigating, and runs a multi-step research agent that produces a structured, cited brief — with every reasoning step persisted and inspectable.
 
-Built end-to-end with a spec → plan → implement → review loop: 20 tasks, each with its own test-driven implementation and independent code review before merge.
-
 ![Watchlist dashboard](docs/screenshots/watchlist.jpg)
 
 ## How it works
