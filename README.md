@@ -16,7 +16,7 @@ See `sentinel-spec/CLAUDE.md` for a project orientation if you're using Claude C
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp ../.env.example .env   # fill in your API keys
+cp .env.example .env   # fill in your API keys
 alembic upgrade head
 uvicorn main:app --reload
 
