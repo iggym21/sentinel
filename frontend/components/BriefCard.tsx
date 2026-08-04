@@ -23,7 +23,7 @@ function formatCreatedAt(iso: string): string {
 }
 
 export default function BriefCard({ brief }: { brief: Brief }) {
-  const { id, ticker_id, thesis, confidence, summary, created_at } = brief;
+  const { id, ticker_symbol, thesis, confidence, summary, created_at } = brief;
 
   return (
     <Link
@@ -31,12 +31,8 @@ export default function BriefCard({ brief }: { brief: Brief }) {
       className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
     >
       <div className="flex items-start justify-between gap-3">
-        {/* BriefOut only carries `ticker_id`, not the ticker symbol (see
-            backend/schemas/brief.py) — the feed shows the numeric id as a
-            stable identifier since there's no cross-reference to a symbol
-            available from `getBriefs()` alone. */}
         <span className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Ticker #{ticker_id}
+          {ticker_symbol}
         </span>
         <ThesisBadge thesis={thesis} />
       </div>

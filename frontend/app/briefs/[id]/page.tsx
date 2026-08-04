@@ -62,7 +62,7 @@ export default async function BriefDetailPage(props: PageProps<"/briefs/[id]">) 
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-                  Ticker #{brief.ticker_id}
+                  {brief.ticker_symbol}
                 </h1>
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                   Brief #{brief.id} · {formatDateTime(brief.created_at)}

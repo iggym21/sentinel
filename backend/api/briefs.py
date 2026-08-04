@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from models.brief import Brief
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/briefs", tags=["briefs"])
 def list_briefs(
     ticker: str | None = None, limit: int = 50, db: Session = Depends(get_db)
 ) -> list[Brief]:
-    query = db.query(Brief)
+    query = db.query(Brief).options(joinedload(Brief.ticker))
     if ticker:
         matched_ticker = db.query(Ticker).filter_by(symbol=ticker.strip().upper()).one_or_none()
         if matched_ticker is None:
@@ -31,7 +31,12 @@ def list_briefs(
 
 @router.get("/{brief_id}", response_model=BriefDetail)
 def get_brief_detail(brief_id: int, db: Session = Depends(get_db)) -> Brief:
-    brief = db.get(Brief, brief_id)
+    brief = (
+        db.query(Brief)
+        .options(joinedload(Brief.ticker))
+        .filter(Brief.id == brief_id)
+        .one_or_none()
+    )
     if brief is None:
         raise HTTPException(status_code=404, detail="Brief not found")
     return brief

@@ -88,4 +88,10 @@ def test_get_brief_detail_includes_trace(db_session):
     client = make_client(db_session)
     resp = client.get(f"/api/briefs/{brief.id}")
     assert resp.status_code == 200
-    assert resp.json()["agent_run"]["trace"][0]["type"] == "final"
+    body = resp.json()
+    assert body["agent_run"]["trace"][0]["type"] == "final"
+    assert body["ticker_symbol"] == "AAPL"
+
+    resp = client.get("/api/briefs")
+    assert resp.status_code == 200
+    assert resp.json()[0]["ticker_symbol"] == "AAPL"

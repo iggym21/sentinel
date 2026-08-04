@@ -40,3 +40,9 @@ class Brief(Base):
     # not paired via back_populates with AgentRun.brief, which uses the separate
     # brief_id FK (see agent_run.py for the circular-FK rationale).
     agent_run: Mapped["AgentRun"] = relationship(foreign_keys=[agent_run_id])
+
+    @property
+    def ticker_symbol(self) -> str:
+        """Convenience accessor so `BriefOut`/`BriefDetail` (from_attributes=True)
+        can expose the ticker's symbol without every caller needing a manual join."""
+        return self.ticker.symbol

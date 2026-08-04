@@ -12,6 +12,7 @@ class BriefOut(BaseModel):
 
     id: int
     ticker_id: int
+    ticker_symbol: str
     agent_run_id: int
     created_at: datetime
     thesis: Thesis

@@ -73,6 +73,7 @@ export interface Evidence {
 export interface Brief {
   id: number;
   ticker_id: number;
+  ticker_symbol: string;
   agent_run_id: number;
   created_at: string; // ISO-8601 datetime
   thesis: Thesis;
