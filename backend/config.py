@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     alpaca_api_key: str | None = None
     alpaca_secret_key: str | None = None
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
+    alpaca_data_url: str = "https://data.alpaca.markets"
     database_url: str = "sqlite:///./sentinel.db"
     watchdog_interval_minutes: int = 15
     volume_spike_threshold_multiplier: float = 2.0

@@ -1,3 +1,4 @@
+import pytest
 import respx
 import httpx
 from providers.edgar_provider import EdgarProvider
@@ -135,6 +136,21 @@ def test_get_filing_text_strips_html_and_truncates():
     text = provider.get_filing_text("https://www.sec.gov/Archives/edgar/data/example.htm", max_chars=1000)
     assert "Revenue grew 12%" in text
     assert "<p>" not in text
+
+
+@respx.mock
+def test_get_filing_text_rejects_non_sec_host():
+    # Regression for the SSRF finding: `filing_url` can be model-chosen in
+    # the Claude backend's tool loop, so a non-SEC host must be rejected
+    # before any request is made — not just filtered after the fact.
+    # No route is mocked for evil.example.com, so if the guard is missing
+    # and a request is actually attempted, respx raises its own
+    # "no matching route" error instead of the expected ValueError,
+    # failing this test either way.
+    provider = EdgarProvider(user_agent="Sentinel test@example.com")
+    with pytest.raises(ValueError):
+        provider.get_filing_text("https://evil.example.com/x", max_chars=1000)
+    assert len(respx.calls) == 0
 
 
 @respx.mock

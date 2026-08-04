@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from models.brief import SuggestedAction, Thesis
 from schemas.agent_run import AgentRunOut
+from schemas.ticker import utc_iso
 
 
 class BriefOut(BaseModel):
@@ -21,6 +22,10 @@ class BriefOut(BaseModel):
     evidence: list[dict[str, Any]]
     diff_from_prior: str | None
     suggested_action: SuggestedAction | None
+
+    @field_serializer("created_at", when_used="json")
+    def _serialize_created_at(self, dt: datetime) -> str | None:
+        return utc_iso(dt)
 
 
 class BriefDetail(BriefOut):

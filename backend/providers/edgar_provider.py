@@ -71,6 +71,7 @@ from __future__ import annotations
 import html
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -78,6 +79,14 @@ from providers.base import FilingRef
 
 _SEARCH_URL = "https://efts.sec.gov/LATEST/search-index"
 _TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+
+# `get_filing_text` fetches whatever URL it's given, and in the Claude
+# backend's tool loop that URL is model-chosen (with the model's context
+# including externally-influenceable fetched news/filing text) — so
+# without a host allowlist this is a latent SSRF path. Real filing
+# documents only ever live on sec.gov, so reject anything else outright
+# rather than silently fetching it.
+_ALLOWED_FILING_HOSTS = {"sec.gov", "www.sec.gov"}
 
 # Strip <script>/<style> elements *including their content* first - the
 # general tag-strip regex below only removes tags, not the CSS/JS text
@@ -134,6 +143,17 @@ class EdgarProvider:
         ]
 
     def get_filing_text(self, filing_url: str, max_chars: int) -> str:
+        # `urlparse(...).hostname` (not a substring check, which is itself
+        # bypassable — e.g. "https://evil.example.com/sec.gov" contains
+        # "sec.gov" but resolves to evil.example.com) so only a real
+        # sec.gov/www.sec.gov host is ever fetched.
+        hostname = urlparse(filing_url).hostname
+        if hostname not in _ALLOWED_FILING_HOSTS:
+            raise ValueError(
+                f"Refusing to fetch filing text from non-SEC host "
+                f"{hostname!r} (url={filing_url!r})"
+            )
+
         response = self._client.get(filing_url)
         response.raise_for_status()
 

@@ -20,6 +20,39 @@ def test_post_and_get_watchlist(db_session):
     assert body[0]["symbol"] == "AAPL"
     assert body[0]["status"] == "quiet"
 
+def test_watchlist_added_at_serializes_with_utc_offset(db_session):
+    # Finding #4 regression: SQLite drops tzinfo on round-trip, and Pydantic
+    # serializing a naive datetime produces an offset-less ISO string (e.g.
+    # "...T20:21:50.195238" with no "Z"/"+00:00"), which JavaScript's
+    # `new Date()` then parses as local time instead of UTC. Every `*Out`
+    # schema's datetime fields must serialize with an explicit UTC marker.
+    client = make_client(db_session)
+    resp = client.post("/api/watchlist", json={"symbol": "AAPL"})
+    assert resp.status_code == 200
+    added_at = resp.json()["added_at"]
+    assert added_at.endswith("Z") or added_at[-6] in "+-"
+
+def test_post_watchlist_rejects_path_traversal_symbol(db_session):
+    # Finding #5 regression: TickerCreate.symbol was a bare `str` reaching
+    # AlpacaProvider's f-string-interpolated URL paths unescaped. A symbol
+    # containing "/" or "?" or ".." must be rejected at the API boundary,
+    # not passed through.
+    client = make_client(db_session)
+    resp = client.post("/api/watchlist", json={"symbol": "../../v2/account"})
+    assert resp.status_code == 422
+
+    resp = client.post("/api/watchlist", json={"symbol": "AAPL?x=1"})
+    assert resp.status_code == 422
+
+def test_delete_watchlist_rejects_invalid_symbol(db_session):
+    # A single path segment (no "/") that's still not a valid ticker
+    # symbol (too long) — exercises `normalize_symbol`'s 422 on a
+    # path-param symbol, since FastAPI path params never go through
+    # `TickerCreate`'s Pydantic validation.
+    client = make_client(db_session)
+    resp = client.delete("/api/watchlist/NOTAVALIDTICKERSYMBOL")
+    assert resp.status_code == 422
+
 def test_watchlist_status_not_triggered_when_run_failed(db_session):
     # Finding 1 regression test: an Anomaly with triggered_analyst_run=True
     # whose linked AgentRun failed (status="failed", but completed_at is

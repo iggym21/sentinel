@@ -15,35 +15,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from agents.backend_factory import get_reasoning_backend
-from config import settings
 from database import get_db
-from providers.alpaca_provider import AlpacaProvider
-from providers.demo_provider import DemoProvider
-from providers.edgar_provider import EdgarProvider
+from providers.factory import build_providers
 from services.watchdog_service import run_watchdog_tick
 
 router = APIRouter(prefix="/watchdog", tags=["watchdog"])
 
-_EDGAR_USER_AGENT = "Sentinel MVP research@sentinel.example"
-
-
-def _build_market_provider():
-    if settings.alpaca_api_key:
-        return AlpacaProvider(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
-            base_url=settings.alpaca_base_url,
-        )
-    return DemoProvider()
-
 
 @router.post("/tick")
 def trigger_watchdog_tick(db: Session = Depends(get_db)) -> list[dict]:
-    market = _build_market_provider()
-    try:
-        filings = EdgarProvider(user_agent=_EDGAR_USER_AGENT)
+    with build_providers() as (market, filings):
         backend = get_reasoning_backend()
         return run_watchdog_tick(db, market, filings, backend=backend)
-    finally:
-        if isinstance(market, AlpacaProvider):
-            market.close()

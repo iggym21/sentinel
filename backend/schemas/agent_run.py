@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from models.agent_run import RunStatus
+from schemas.ticker import utc_iso
 
 
 class AgentRunOut(BaseModel):
@@ -17,3 +18,7 @@ class AgentRunOut(BaseModel):
     status: RunStatus
     trace: list[dict[str, Any]]
     brief_id: int | None
+
+    @field_serializer("started_at", "completed_at", when_used="json")
+    def _serialize_timestamps(self, dt: datetime | None) -> str | None:
+        return utc_iso(dt)

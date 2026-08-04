@@ -15,15 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from config import settings
 from database import get_db
 from models.agent_run import AgentRun, RunStatus
 from models.anomaly import Anomaly
 from models.brief import Brief
 from models.ticker import Ticker
-from providers.alpaca_provider import AlpacaProvider
-from providers.demo_provider import DemoProvider
-from schemas.ticker import TickerCreate, TickerOut, WatchlistEntry
+from providers.factory import build_providers
+from schemas.ticker import TickerCreate, TickerOut, WatchlistEntry, normalize_symbol
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
@@ -31,16 +29,6 @@ router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 # a ticker's status to still read "triggered" rather than falling back to
 # "quiet".
 _TRIGGERED_WINDOW = timedelta(hours=1)
-
-
-def _build_market_provider():
-    if settings.alpaca_api_key:
-        return AlpacaProvider(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
-            base_url=settings.alpaca_base_url,
-        )
-    return DemoProvider()
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -78,10 +66,9 @@ def _compute_status(db: Session, ticker_id: int) -> str:
 @router.get("", response_model=list[WatchlistEntry])
 def list_watchlist(db: Session = Depends(get_db)) -> list[WatchlistEntry]:
     tickers = db.query(Ticker).filter(Ticker.active.is_(True)).all()
-    market = _build_market_provider()
 
     entries: list[WatchlistEntry] = []
-    try:
+    with build_providers() as (market, _filings):
         for ticker in tickers:
             latest_price: float | None = None
             day_change_pct: float | None = None
@@ -113,9 +100,6 @@ def list_watchlist(db: Session = Depends(get_db)) -> list[WatchlistEntry]:
                     last_brief_at=last_brief.created_at if last_brief else None,
                 )
             )
-    finally:
-        if isinstance(market, AlpacaProvider):
-            market.close()
 
     return entries
 
@@ -136,7 +120,7 @@ def create_watchlist_entry(body: TickerCreate, db: Session = Depends(get_db)) ->
 
 @router.delete("/{symbol}", status_code=204)
 def delete_watchlist_entry(symbol: str, db: Session = Depends(get_db)) -> None:
-    ticker = db.query(Ticker).filter_by(symbol=symbol.strip().upper()).one_or_none()
+    ticker = db.query(Ticker).filter_by(symbol=normalize_symbol(symbol)).one_or_none()
     if ticker is None:
         raise HTTPException(status_code=404, detail="Ticker not found")
     ticker.active = False

@@ -16,34 +16,20 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from agents.backend_factory import get_reasoning_backend
-from config import settings
 from database import get_db
 from models.brief import Brief
 from models.ticker import Ticker
-from providers.alpaca_provider import AlpacaProvider
-from providers.demo_provider import DemoProvider
-from providers.edgar_provider import EdgarProvider
+from providers.factory import build_providers
 from schemas.brief import BriefOut
+from schemas.ticker import normalize_symbol
 from services.analyst_service import run_analyst_for_ticker
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
 
-_EDGAR_USER_AGENT = "Sentinel MVP research@sentinel.example"
-
-
-def _build_market_provider():
-    if settings.alpaca_api_key:
-        return AlpacaProvider(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
-            base_url=settings.alpaca_base_url,
-        )
-    return DemoProvider()
-
 
 @router.get("/{symbol}/history")
 def get_ticker_history(symbol: str, db: Session = Depends(get_db)) -> dict:
-    ticker = db.query(Ticker).filter_by(symbol=symbol.strip().upper()).one_or_none()
+    ticker = db.query(Ticker).filter_by(symbol=normalize_symbol(symbol)).one_or_none()
     if ticker is None:
         raise HTTPException(status_code=404, detail="Ticker not found")
 
@@ -63,13 +49,9 @@ def get_ticker_history(symbol: str, db: Session = Depends(get_db)) -> dict:
 
 @router.post("/{symbol}/run", response_model=BriefOut)
 def run_analyst_now(symbol: str, db: Session = Depends(get_db)) -> Brief:
-    market = _build_market_provider()
-    try:
-        filings = EdgarProvider(user_agent=_EDGAR_USER_AGENT)
+    normalized_symbol = normalize_symbol(symbol)
+    with build_providers() as (market, filings):
         backend = get_reasoning_backend()
         return run_analyst_for_ticker(
-            db, symbol.strip().upper(), market, filings, backend=backend
+            db, normalized_symbol, market, filings, backend=backend
         )
-    finally:
-        if isinstance(market, AlpacaProvider):
-            market.close()

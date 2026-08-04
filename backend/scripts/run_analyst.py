@@ -18,32 +18,18 @@ from __future__ import annotations
 
 import sys
 
-from config import settings
 from database import SessionLocal
 from models.agent_run import AgentRun
-from providers.alpaca_provider import AlpacaProvider
-from providers.demo_provider import DemoProvider
-from providers.edgar_provider import EdgarProvider
+from providers.factory import build_providers
 from services.analyst_service import run_analyst_for_ticker
-
-
-def _build_market_provider():
-    if settings.alpaca_api_key:
-        return AlpacaProvider(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
-            base_url=settings.alpaca_base_url,
-        )
-    return DemoProvider()
 
 
 def main(ticker_symbol: str) -> None:
     db = SessionLocal()
-    market = _build_market_provider()
-    filings = EdgarProvider(user_agent="Sentinel MVP research@sentinel.example")
 
     try:
-        brief = run_analyst_for_ticker(db, ticker_symbol, market, filings)
+        with build_providers() as (market, filings):
+            brief = run_analyst_for_ticker(db, ticker_symbol, market, filings)
 
         run = db.query(AgentRun).filter_by(id=brief.agent_run_id).one()
 
@@ -68,8 +54,6 @@ def main(ticker_symbol: str) -> None:
 
         print(f"\nTrace steps recorded: {len(run.trace)}")
     finally:
-        if isinstance(market, AlpacaProvider):
-            market.close()
         db.close()
 
 
