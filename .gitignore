@@ -21,3 +21,12 @@ node_modules/
 # Project
 .superpowers/
 graphify-out/
+
+# Dev/build-process artifacts (spec, plans, hand-off notes, scaffold noise) —
+# kept locally for reference, not part of the shipped product
+PROGRESS.md
+sentinel-spec/
+docs/superpowers/
+frontend/AGENTS.md
+frontend/CLAUDE.md
+frontend/README.md

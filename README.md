@@ -85,19 +85,9 @@ cd frontend && npx tsc --noEmit                        # frontend has no Jest su
                                                          # verified via tsc + build + live browser walkthrough
 ```
 
-## Project docs
-
-Built from a full spec, in `sentinel-spec/`:
-
-1. `sentinel-spec/docs/PRD.md` — what we're building and why
-2. `sentinel-spec/docs/ARCHITECTURE.md` — how the two agents work and fit together
-3. `sentinel-spec/docs/DATA_MODELS.md` — database schema
-4. `sentinel-spec/docs/AGENT_TOOLS.md` — exact tool schemas for the Claude API
-5. `sentinel-spec/docs/BUILD_PLAN.md` — day-by-day build order
-
 ## Explicitly out of scope
 
-No auth, no real trade execution, US equities only, no WebSocket/live-push (polling only), no cloud deployment config — see `docs/superpowers/plans/2026-08-04-sentinel-mvp.md` for the full build plan and its documented cut list.
+No auth, no real trade execution, US equities only, no WebSocket/live-push (polling only), no cloud deployment config.
 
 ## License
 
