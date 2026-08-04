@@ -27,8 +27,20 @@ const STATUS_STYLES: Record<Status, { label: string; className: string }> = {
   },
 };
 
+/**
+ * Fallback used when `status` isn't one of the known Status values (e.g. the
+ * backend sends a string outside the union — WatchlistEntry.status is typed
+ * as plain `string` upstream, so this can't be ruled out at compile time).
+ * Renders a neutral "unknown" badge instead of throwing.
+ */
+const UNKNOWN_STATUS_STYLE = {
+  label: "Unknown",
+  className:
+    "bg-amber-50 text-amber-700 ring-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-800",
+};
+
 export default function StatusBadge({ status }: { status: Status }) {
-  const style = STATUS_STYLES[status];
+  const style = STATUS_STYLES[status] ?? UNKNOWN_STATUS_STYLE;
 
   return (
     <span
