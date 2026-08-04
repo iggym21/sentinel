@@ -34,6 +34,12 @@ from agents.tools.schemas import TOOL_SCHEMAS
 # calls) from running away indefinitely / racking up API cost.
 _MAX_ITERATIONS = 15
 
+# `max_tokens` is a required keyword-only argument on the Messages API
+# (missing it is a hard TypeError/400, not a soft default) — 8000 is
+# comfortably enough for a brief-producing tool-use turn without being
+# wasteful, since most turns are a single tool_use block, not prose.
+_MAX_TOKENS = 8000
+
 # Must match `submit_brief`'s `input_schema.required` in
 # `agents/tools/schemas.py::TOOL_SCHEMAS` exactly.
 _SUBMIT_BRIEF_REQUIRED_FIELDS = ["thesis", "confidence", "summary", "evidence"]
@@ -91,6 +97,7 @@ class ClaudeBackend:
         for _ in range(_MAX_ITERATIONS):
             response = self.client.messages.create(
                 model=settings.analyst_model,
+                max_tokens=_MAX_TOKENS,
                 system=ANALYST_SYSTEM_PROMPT,
                 messages=messages,
                 tools=TOOL_SCHEMAS,
@@ -111,6 +118,13 @@ class ClaudeBackend:
                     return self._finalize(block.input, trace)
 
                 if block.name not in tool_dispatch:
+                    # Deliberate MVP simplification: an unknown tool name
+                    # (or a dispatch-time exception below) aborts the
+                    # whole run rather than being reported back to the
+                    # model as an `is_error: True` tool_result so it can
+                    # try to recover. Acceptable for now since
+                    # `tool_dispatch` only ever contains the fixed set
+                    # of tools advertised in `TOOL_SCHEMAS`.
                     raise ValueError(f"Analyst requested unknown tool '{block.name}'")
 
                 output = tool_dispatch[block.name](block.input)
@@ -123,13 +137,29 @@ class ClaudeBackend:
                     }
                 )
 
-            if tool_result_blocks:
-                messages.append({"role": "user", "content": tool_result_blocks})
+            if not tool_result_blocks:
+                # No non-terminal tool_use block was found in this turn
+                # (e.g. the model returned text only, or an empty
+                # content list) and `submit_brief` wasn't called either
+                # (that path already returned above). `messages` at this
+                # point ends in a trailing assistant turn with no
+                # tool_result to pair it with — sending that back as the
+                # next request's `messages` is an assistant-prefill,
+                # which the Messages API rejects with a 400 on
+                # Sonnet 4.6+/Opus 4.6+ (including `settings.analyst_model`).
+                # Fail loudly here instead of silently retrying into that
+                # 400 on the next iteration.
+                raise RuntimeError(
+                    "Analyst ended its turn without calling a tool or "
+                    "submit_brief"
+                )
+
+            messages.append({"role": "user", "content": tool_result_blocks})
 
         raise RuntimeError("Analyst agent exceeded max tool-use iterations")
 
     def _finalize(self, submit_input: dict, trace: TraceRecorder) -> AnalystBriefResult:
-        missing = [f for f in _SUBMIT_BRIEF_REQUIRED_FIELDS if f not in submit_input]
+        missing = [f for f in _SUBMIT_BRIEF_REQUIRED_FIELDS if submit_input.get(f) is None]
         if missing:
             raise ValueError(
                 f"submit_brief call is missing required field(s): {', '.join(missing)}"

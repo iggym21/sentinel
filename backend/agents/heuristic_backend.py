@@ -146,7 +146,7 @@ class HeuristicBackend:
             f"20-day trend {trend_20d_pct:+.2f}%"
             + (f", volatility {volatility_20d_pct}%" if volatility_20d_pct is not None else "")
             + ". "
-            + ratios.get("note", "")
+            + (ratios.get("note") or "")
         ).strip()
 
         diff_from_prior: str | None = None
