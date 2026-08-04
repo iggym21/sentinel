@@ -48,7 +48,7 @@ def build_tool_dispatch(
             filings, ticker, **_without_ticker(tool_input)
         ),
         "get_filing_text": lambda tool_input: get_filing_text(
-            filings, **tool_input
+            filings, **_without_ticker(tool_input)
         ),
         "get_recent_news": lambda tool_input: get_recent_news(
             market, ticker, **_without_ticker(tool_input)
