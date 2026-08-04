@@ -18,7 +18,10 @@ class AgentRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticker_id: Mapped[int] = mapped_column(ForeignKey("ticker.id"), nullable=False)
-    anomaly_id: Mapped[int | None] = mapped_column(ForeignKey("anomaly.id"), nullable=True)
+    # unique: Anomaly.agent_run / AgentRun.anomaly is a one-to-one relationship
+    # (uselist=False + back_populates); enforce that at the DB level too so a
+    # second AgentRun can't silently point at the same anomaly.
+    anomaly_id: Mapped[int | None] = mapped_column(ForeignKey("anomaly.id"), unique=True, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), nullable=False)
